@@ -16,6 +16,19 @@ pub enum AgentError {
 
     #[error("Tool not found: {0}")]
     ToolNotFound(String),
+
+    #[error("RAG error: {0}")]
+    RAGError(String),
+
+    #[error("Candle error: {0}")]
+    CandleError(#[from] candle_core::Error),
+
+    #[error("Vector store error: {0}")]
+    VectorStoreError(String),
+
+    #[allow(dead_code)]
+    #[error("Embedding error: {0}")]
+    EmbeddingError(String),
 }
 
 #[cfg(test)]

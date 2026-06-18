@@ -1,6 +1,8 @@
 pub struct Config {
     pub ollama_host: String,
     pub ollama_model: String,
+    pub vector_store_uri: String,
+    pub vector_table_name: String,
 }
 
 impl Config {
@@ -9,6 +11,10 @@ impl Config {
             ollama_host: std::env::var("OLLAMA_HOST")
                 .unwrap_or_else(|_| "http://localhost:11434".to_string()),
             ollama_model: std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "qwen3:8b".to_string()),
+            vector_store_uri: std::env::var("VECTOR_STORE_URI")
+                .unwrap_or_else(|_| "data/lancedb".to_string()),
+            vector_table_name: std::env::var("VECTOR_TABLE_NAME")
+                .unwrap_or_else(|_| "documents".to_string()),
         }
     }
 }

@@ -1,4 +1,5 @@
 [default.extend-words]
+mmaped = "mmaped"
 
 [files]
 extend-exclude = ["CHANGELOG.md", "notebooks/*"]

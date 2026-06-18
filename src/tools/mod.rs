@@ -16,6 +16,7 @@ pub trait Tool: Send + Sync {
     async fn call(&self, args: Value) -> Result<String, AgentError>;
 }
 
+#[derive(Clone)]
 pub struct ToolEngine {
     tools: HashMap<String, Arc<dyn Tool>>,
 }

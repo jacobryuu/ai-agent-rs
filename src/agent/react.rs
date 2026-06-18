@@ -4,6 +4,7 @@ use crate::core::{AgentError, LLMProvider, Message, Role, ToolCall};
 use crate::memory::SlidingWindowMemory;
 use crate::tools::ToolEngine;
 
+#[allow(dead_code)]
 pub struct ReActAgent {
     provider: Box<dyn LLMProvider>,
     tools: ToolEngine,
@@ -12,6 +13,7 @@ pub struct ReActAgent {
     max_iterations: usize,
 }
 
+#[allow(dead_code)]
 impl ReActAgent {
     pub fn new(
         provider: Box<dyn LLMProvider>,
