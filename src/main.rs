@@ -14,9 +14,22 @@ use crate::agent::GraphAgent;
 use crate::config::Config;
 use crate::core::LLMProvider;
 use crate::llm::ollama::OllamaProvider;
-use crate::rag::{CandleEmbeddingProvider, EmbeddingProvider, LanceVectorStore};
+use crate::rag::{
+    CandleEmbeddingProvider, EmbeddingProvider, Indexer, LanceVectorStore, VectorStore,
+};
 use crate::tools::ToolEngine;
 use crate::tools::builtin::*;
+
+fn parse_args() -> Option<String> {
+    let mut args = std::env::args().skip(1);
+    let subcommand = args.next()?;
+    if subcommand == "index" {
+        args.next()
+    } else {
+        eprintln!("Usage: ai-agent-rs [index <path>]");
+        std::process::exit(1);
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -24,19 +37,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = Config::from_env();
 
-    let provider =
-        Box::new(OllamaProvider::new(config.ollama_host.clone(), config.ollama_model.clone()));
+    let embedding_provider: Option<Arc<dyn EmbeddingProvider>> =
+        match CandleEmbeddingProvider::new() {
+            Ok(p) => Some(Arc::new(p)),
+            Err(e) => {
+                warn!(
+                    "Failed to initialize embedding provider: {}. RAG features will be disabled.",
+                    e
+                );
+                None
+            }
+        };
 
-    // Initialize RAG
-    let embedding_provider = match CandleEmbeddingProvider::new() {
-        Ok(p) => Some(Arc::new(p)),
-        Err(e) => {
-            warn!("Failed to initialize embedding provider: {}. RAG features will be disabled.", e);
-            None
-        }
-    };
-
-    let vector_store = if let Some(ref ep) = embedding_provider {
+    let vector_store: Option<Arc<dyn VectorStore>> = if let Some(ref ep) = embedding_provider {
         match LanceVectorStore::new(
             &config.vector_store_uri,
             &config.vector_table_name,
@@ -53,6 +66,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         None
     };
+
+    if let Some(path) = parse_args() {
+        return run_index(path, embedding_provider, vector_store).await;
+    }
+
+    let provider =
+        Box::new(OllamaProvider::new(config.ollama_host.clone(), config.ollama_model.clone()));
 
     let mut tool_engine = ToolEngine::new();
     tool_engine.register(Arc::new(ReadFileTool));
@@ -112,5 +132,30 @@ If you can answer without tools, just respond directly."#
         println!();
     }
 
+    Ok(())
+}
+
+async fn run_index(
+    path: String,
+    embedding_provider: Option<Arc<dyn EmbeddingProvider>>,
+    vector_store: Option<Arc<dyn VectorStore>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (ep, vs) = match (embedding_provider, vector_store) {
+        (Some(ep), Some(vs)) => (ep, vs),
+        _ => {
+            eprintln!("RAG is not available. Cannot index documents.");
+            std::process::exit(1);
+        }
+    };
+
+    println!("Indexing documents in {} ...", path);
+    println!(
+        "Note: Re-indexing will create duplicate entries. Delete the vector store first to start fresh."
+    );
+
+    let indexer = Indexer::new(ep, vs);
+    let count = indexer.index_directory(&path).await?;
+    info!("Indexing complete. {} chunks indexed.", count);
+    println!("Indexed {} chunks from {}", count, path);
     Ok(())
 }

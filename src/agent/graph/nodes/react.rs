@@ -21,6 +21,14 @@ impl LLMNode {
 impl Node for LLMNode {
     async fn process(&self, state: &mut State) -> Result<(), AgentError> {
         debug!("Processing LLMNode");
+
+        let iteration: usize =
+            state.context.get("iteration").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        if iteration >= 25 {
+            return Err(AgentError::LLMError("Max iterations (25) reached".into()));
+        }
+        state.context.insert("iteration".into(), serde_json::json!(iteration + 1));
+
         let tool_defs = self.tools.get_defs();
 
         let mut messages = Vec::new();
@@ -42,6 +50,12 @@ impl Node for LLMNode {
             .collect();
 
         if !valid_calls.is_empty() {
+            state.context.insert("last_tool_count".into(), serde_json::json!(valid_calls.len()));
+            state.context.insert(
+                "last_tool_names".into(),
+                serde_json::json!(valid_calls.iter().map(|c| &c.function.name).collect::<Vec<_>>()),
+            );
+
             state.messages.push(Message {
                 role: Role::Assistant,
                 content: response.content.unwrap_or_default(),
@@ -51,6 +65,7 @@ impl Node for LLMNode {
             state.next_node = Some("tools".to_string());
             info!("LLM requested {} tool calls", valid_calls.len());
         } else if let Some(content) = response.content {
+            state.context.insert("has_final_response".into(), serde_json::json!(true));
             state.messages.push(Message {
                 role: Role::Assistant,
                 content: content.clone(),
@@ -81,14 +96,20 @@ impl ToolNode {
 impl Node for ToolNode {
     async fn process(&self, state: &mut State) -> Result<(), AgentError> {
         debug!("Processing ToolNode");
-        // Get the tool calls from the last assistant message
+
         let tool_calls = state.messages.last().and_then(|m| m.tool_calls.clone());
 
         if let Some(tool_calls) = tool_calls {
             info!("Executing {} tool calls", tool_calls.len());
+            state.context.insert("tool_results".into(), serde_json::json!([]));
+            let mut results = Vec::new();
             for tool_call in &tool_calls {
                 info!("Executing tool: {}", tool_call.function.name);
                 let result = self.tools.execute(tool_call).await?;
+                results.push(serde_json::json!({
+                    "tool": tool_call.function.name,
+                    "tool_call_id": tool_call.id,
+                }));
                 state.messages.push(Message {
                     role: Role::Tool,
                     content: result.content,
@@ -96,6 +117,7 @@ impl Node for ToolNode {
                     tool_call_id: Some(result.tool_call_id),
                 });
             }
+            state.context.insert("tool_results".into(), serde_json::json!(results));
             state.next_node = Some("llm".to_string());
         } else {
             warn!("ToolNode called but last message has no tool calls");

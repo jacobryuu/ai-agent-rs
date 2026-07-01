@@ -5,7 +5,6 @@ use crate::core::Message;
 
 pub struct State {
     pub messages: Vec<Message>,
-    #[allow(dead_code)]
     pub context: HashMap<String, Value>,
     pub next_node: Option<String>,
 }

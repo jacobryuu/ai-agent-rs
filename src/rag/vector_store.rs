@@ -23,7 +23,6 @@ pub struct SearchResult {
 
 #[async_trait]
 pub trait VectorStore: Send + Sync {
-    #[allow(dead_code)]
     async fn add(&self, id: &str, vector: Vec<f32>, metadata: Value) -> Result<(), AgentError>;
     async fn search(&self, vector: Vec<f32>, top_k: usize)
     -> Result<Vec<SearchResult>, AgentError>;
