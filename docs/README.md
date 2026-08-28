@@ -29,7 +29,11 @@ A high-performance, local-first AI agent in Rust. Runs against Ollama, uses a gr
 | 3 | Graph Orchestrator (LangGraph-style) | ✅ Complete |
 | 3 (roadmap) | State.context utilization + iteration limit | ✅ Complete |
 | Cleanup | Dead code removal (`ReActAgent`) | ✅ Complete |
-| 2 (roadmap) | Streaming responses + web_search | ❌ Planned |
-| 3 (roadmap) | Long-term memory | ❌ Planned |
-| 4 | Cloud providers (OpenAI, Anthropic) | ❌ Planned |
+| 2 (roadmap) | Streaming responses | ✅ Complete |
+| 2 (roadmap) | Index deduplication (hash-based) | ✅ Complete |
+| 3 (roadmap) | Parallel tool execution (futures::join_all) | ✅ Complete |
+| 3 (roadmap) | Long-term memory (SummaryMemory) | ✅ Complete |
+| 4 | Cloud providers (OpenAI) | ✅ Complete |
 | 5 | Web UI + persistence | ❌ Planned |
+| 4 (roadmap) | Anthropic provider | ❌ Planned |
+| 3 (roadmap) | Streaming UI integration | ❌ Planned |

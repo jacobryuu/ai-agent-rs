@@ -1,8 +1,10 @@
 use async_trait::async_trait;
+use futures::StreamExt;
+use futures::future::join_all;
 use tracing::{debug, info, warn};
 
 use crate::agent::graph::{Node, State};
-use crate::core::{AgentError, LLMProvider, Message, Role, ToolCall};
+use crate::core::{AgentError, LLMProvider, LLMResponse, Message, Role, ToolCall};
 use crate::tools::ToolEngine;
 
 pub struct LLMNode {
@@ -40,7 +42,31 @@ impl Node for LLMNode {
         });
         messages.extend(state.messages.clone());
 
-        let response = self.provider.chat(&messages, &tool_defs).await?;
+        let response = if self.provider.supports_streaming() {
+            let mut stream = self.provider.chat_stream(&messages, &tool_defs).await?;
+            let mut content = String::new();
+            let mut tool_calls = None;
+            while let Some(chunk_result) = stream.next().await {
+                let chunk = chunk_result?;
+                if let Some(part) = chunk.content {
+                    content.push_str(&part);
+                }
+                if let Some(calls) = chunk.tool_calls {
+                    tool_calls = Some(calls);
+                }
+                if chunk.done {
+                    break;
+                }
+            }
+            debug!(
+                "Streamed LLM response: {} chars, tool_calls={}",
+                content.len(),
+                tool_calls.as_ref().map_or(0, Vec::len)
+            );
+            LLMResponse { content: Some(content), tool_calls }
+        } else {
+            self.provider.chat(&messages, &tool_defs).await?
+        };
 
         let valid_calls: Vec<ToolCall> = response
             .tool_calls
@@ -100,23 +126,53 @@ impl Node for ToolNode {
         let tool_calls = state.messages.last().and_then(|m| m.tool_calls.clone());
 
         if let Some(tool_calls) = tool_calls {
-            info!("Executing {} tool calls", tool_calls.len());
+            info!("Executing {} tool calls (parallel)", tool_calls.len());
             state.context.insert("tool_results".into(), serde_json::json!([]));
+
+            let futures: Vec<_> = tool_calls
+                .iter()
+                .map(|tc| {
+                    let tools = self.tools.clone();
+                    let tc = tc.clone();
+                    async move { tools.execute(&tc).await }
+                })
+                .collect();
+
+            let results_raw = join_all(futures).await;
+
             let mut results = Vec::new();
-            for tool_call in &tool_calls {
-                info!("Executing tool: {}", tool_call.function.name);
-                let result = self.tools.execute(tool_call).await?;
-                results.push(serde_json::json!({
-                    "tool": tool_call.function.name,
-                    "tool_call_id": tool_call.id,
-                }));
-                state.messages.push(Message {
-                    role: Role::Tool,
-                    content: result.content,
-                    tool_calls: None,
-                    tool_call_id: Some(result.tool_call_id),
-                });
+            for (i, result) in results_raw.into_iter().enumerate() {
+                let tool_call = &tool_calls[i];
+                match result {
+                    Ok(result) => {
+                        results.push(serde_json::json!({
+                            "tool": tool_call.function.name,
+                            "tool_call_id": tool_call.id,
+                        }));
+                        state.messages.push(Message {
+                            role: Role::Tool,
+                            content: result.content,
+                            tool_calls: None,
+                            tool_call_id: Some(result.tool_call_id),
+                        });
+                    }
+                    Err(e) => {
+                        warn!("Tool '{}' failed: {}", tool_call.function.name, e);
+                        results.push(serde_json::json!({
+                            "tool": tool_call.function.name,
+                            "tool_call_id": tool_call.id,
+                            "error": e.to_string(),
+                        }));
+                        state.messages.push(Message {
+                            role: Role::Tool,
+                            content: format!("Error: {}", e),
+                            tool_calls: None,
+                            tool_call_id: Some(tool_call.id.clone()),
+                        });
+                    }
+                }
             }
+
             state.context.insert("tool_results".into(), serde_json::json!(results));
             state.next_node = Some("llm".to_string());
         } else {

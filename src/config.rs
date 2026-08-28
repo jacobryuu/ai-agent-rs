@@ -3,6 +3,10 @@ pub struct Config {
     pub ollama_model: String,
     pub vector_store_uri: String,
     pub vector_table_name: String,
+    pub openai_api_key: Option<String>,
+    pub openai_model: String,
+    pub openai_base_url: String,
+    pub llm_provider: String,
 }
 
 impl Config {
@@ -15,6 +19,11 @@ impl Config {
                 .unwrap_or_else(|_| "data/lancedb".to_string()),
             vector_table_name: std::env::var("VECTOR_TABLE_NAME")
                 .unwrap_or_else(|_| "documents".to_string()),
+            openai_api_key: std::env::var("OPENAI_API_KEY").ok(),
+            openai_model: std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4o".to_string()),
+            openai_base_url: std::env::var("OPENAI_BASE_URL")
+                .unwrap_or_else(|_| "https://api.openai.com/v1".to_string()),
+            llm_provider: std::env::var("LLM_PROVIDER").unwrap_or_else(|_| "ollama".to_string()),
         }
     }
 }

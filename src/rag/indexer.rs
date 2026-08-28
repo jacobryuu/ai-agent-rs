@@ -1,9 +1,9 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::fs;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::core::AgentError;
 use crate::rag::{EmbeddingProvider, VectorStore};
@@ -12,6 +12,8 @@ pub struct Indexer {
     embedding_provider: Arc<dyn EmbeddingProvider>,
     vector_store: Arc<dyn VectorStore>,
     chunk_size: usize,
+    seen_hashes: HashSet<String>,
+    skipped_chunks: usize,
 }
 
 impl Indexer {
@@ -19,10 +21,28 @@ impl Indexer {
         embedding_provider: Arc<dyn EmbeddingProvider>,
         vector_store: Arc<dyn VectorStore>,
     ) -> Self {
-        Self { embedding_provider, vector_store, chunk_size: 512 }
+        Self {
+            embedding_provider,
+            vector_store,
+            chunk_size: 512,
+            seen_hashes: HashSet::new(),
+            skipped_chunks: 0,
+        }
     }
 
-    pub async fn index_directory(&self, dir_path: &str) -> Result<usize, AgentError> {
+    pub fn skipped_duplicates(&self) -> usize {
+        self.skipped_chunks
+    }
+
+    fn content_hash(text: &str) -> String {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        text.hash(&mut hasher);
+        format!("{:x}", hasher.finish())
+    }
+
+    pub async fn index_directory(&mut self, dir_path: &str) -> Result<usize, AgentError> {
         let root = PathBuf::from(dir_path);
         if !root.is_dir() {
             return Err(AgentError::RAGError(format!("Not a directory: {}", dir_path)));
@@ -71,6 +91,14 @@ impl Indexer {
                 let mut file_chunks = 0usize;
 
                 for (i, chunk) in chunks.iter().enumerate() {
+                    let hash = Self::content_hash(chunk);
+                    if self.seen_hashes.contains(&hash) {
+                        self.skipped_chunks += 1;
+                        debug!("Skipping duplicate chunk from '{}' index {}", file_name, i);
+                        continue;
+                    }
+                    self.seen_hashes.insert(hash);
+
                     let doc_id = format!("{}#chunk{}", file_name, i);
                     match self.embedding_provider.embed(chunk).await {
                         Ok(vector) => {
@@ -172,5 +200,19 @@ mod tests {
     fn test_chunk_text_empty() {
         let chunks = Indexer::chunk_text("", 512);
         assert!(chunks.is_empty());
+    }
+
+    #[test]
+    fn test_content_hash_deterministic() {
+        let h1 = Indexer::content_hash("hello world");
+        let h2 = Indexer::content_hash("hello world");
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn test_content_hash_different() {
+        let h1 = Indexer::content_hash("hello");
+        let h2 = Indexer::content_hash("world");
+        assert_ne!(h1, h2);
     }
 }

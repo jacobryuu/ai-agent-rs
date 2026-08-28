@@ -14,6 +14,7 @@ use crate::agent::GraphAgent;
 use crate::config::Config;
 use crate::core::LLMProvider;
 use crate::llm::ollama::OllamaProvider;
+use crate::llm::openai::OpenAIProvider;
 use crate::rag::{
     CandleEmbeddingProvider, EmbeddingProvider, Indexer, LanceVectorStore, VectorStore,
 };
@@ -28,6 +29,23 @@ fn parse_args() -> Option<String> {
     } else {
         eprintln!("Usage: ai-agent-rs [index <path>]");
         std::process::exit(1);
+    }
+}
+
+fn create_provider(config: &Config) -> Box<dyn LLMProvider> {
+    match config.llm_provider.as_str() {
+        "openai" => {
+            let api_key = config
+                .openai_api_key
+                .as_ref()
+                .expect("OPENAI_API_KEY environment variable is required for OpenAI provider");
+            Box::new(OpenAIProvider::with_base_url(
+                api_key.clone(),
+                config.openai_model.clone(),
+                config.openai_base_url.clone(),
+            ))
+        }
+        _ => Box::new(OllamaProvider::new(config.ollama_host.clone(), config.ollama_model.clone())),
     }
 }
 
@@ -71,8 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return run_index(path, embedding_provider, vector_store).await;
     }
 
-    let provider =
-        Box::new(OllamaProvider::new(config.ollama_host.clone(), config.ollama_model.clone()));
+    let provider = create_provider(&config);
 
     let mut tool_engine = ToolEngine::new();
     tool_engine.register(Arc::new(ReadFileTool));
@@ -102,8 +119,12 @@ After receiving tool results, continue helping the user with the information.
 If you can answer without tools, just respond directly."#
         .to_string();
 
-    info!("AI Agent started with model: {}", provider.model_name());
-    println!("AI Agent (Ollama: {})", config.ollama_model);
+    info!(
+        "AI Agent started with provider: {}, model: {}",
+        config.llm_provider,
+        provider.model_name()
+    );
+    println!("AI Agent (Provider: {}, Model: {})", config.llm_provider, provider.model_name());
 
     let mut agent = GraphAgent::new(provider, tool_engine, system_prompt);
     println!("Type 'exit' to quit");
@@ -149,13 +170,11 @@ async fn run_index(
     };
 
     println!("Indexing documents in {} ...", path);
-    println!(
-        "Note: Re-indexing will create duplicate entries. Delete the vector store first to start fresh."
-    );
 
-    let indexer = Indexer::new(ep, vs);
+    let mut indexer = Indexer::new(ep, vs);
     let count = indexer.index_directory(&path).await?;
-    info!("Indexing complete. {} chunks indexed.", count);
-    println!("Indexed {} chunks from {}", count, path);
+    let skipped = indexer.skipped_duplicates();
+    info!("Indexing complete. {} chunks indexed, {} duplicates skipped.", count, skipped);
+    println!("Indexed {} chunks ({} duplicates skipped) from {}", count, skipped, path);
     Ok(())
 }
